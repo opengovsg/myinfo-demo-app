@@ -3,13 +3,30 @@ var path = require('path');
 var bodyParser = require('body-parser');
 var cookieParser = require('cookie-parser');
 const cors = require('cors');
-const crypto = require('crypto');
-const colors = require('colors');
-var MyInfoConnector = require('myinfo-connector-nodejs');
+const {
+  decryptSgIdData,
+  decryptSingpassData,
+  createHeaders,
+  getProfileAndScope
+} = require('./lib/utils');
+require('dotenv').config();
+const {
+  MYINFO_AUTHORISE_URL,
+  MYINFO_TOKEN_URL,
+  MYINFO_PERSON_URL,
+  MYINFO_CLIENT_ID,
+  MYINFO_CLIENT_SECRET,
+  MYINFO_ATTRIBUTES,
+  MYINFO_PURPOSE,
+  SGID_AUTHORISE_URL,
+  SGID_SCOPE,
+  SGID_TOKEN_URL,
+  SGID_PERSON_URL,
+} = process.env;
+
 
 const app = express();
 const port = 3001;
-const config = require('./config/config.js');
 
 
 app.use(express.json());
@@ -31,93 +48,94 @@ app.get('/', function (req, res) {
   res.sendFile(__dirname + '/public/index.html');
 });
 
-// get the environment variables (app info) from the config
-app.get('/getEnv', function (req, res) {
-
-  try {
-    var environment = process.argv[2].toUpperCase(); // get from package.json process argument
-    // console.log("Environment:".yellow, environment);
-    if (environment == "SANDBOX") {
-      // overwrite the Environment, Token URL and Person URL if Environemnt is 'Sandbox'. 
-      // 'Sandbox' environment doesn't have Payload Encryption & PKI Digital Signature
-      config.MYINFO_CONNECTOR_CONFIG.ENVIRONMENT = environment;
-      config.MYINFO_CONNECTOR_CONFIG.TOKEN_URL = config.APP_CONFIG.MYINFO_API_TOKEN[environment];
-      config.MYINFO_CONNECTOR_CONFIG.PERSON_URL = config.APP_CONFIG.MYINFO_API_PERSON[environment];
-      console.log("Payload Encryption & PKI Digital Signature:".yellow, "Disabled".grey,"(Sandbox Env)");
-    } else {
-      console.log("Payload Encryption & PKI Digital Signature:".yellow, "Enabled".green,"(Test Env)");
-    }
-
-    if (config.APP_CONFIG.DEMO_APP_CLIENT_ID == undefined || config.APP_CONFIG.DEMO_APP_CLIENT_ID == null) {
-      res.status(500).send({
-        "error": "Missing Client ID"
-      });
-    } else {
-      res.status(200).send({
-        "clientId": config.APP_CONFIG.DEMO_APP_CLIENT_ID,
-        "redirectUrl": config.APP_CONFIG.DEMO_APP_CALLBACK_URL,
-        "attributes": config.APP_CONFIG.DEMO_APP_SCOPES,
-        "purpose": config.APP_CONFIG.DEMO_APP_PURPOSE,
-        "environment": environment,
-        "authApiUrl": config.APP_CONFIG.MYINFO_API_AUTHORISE[environment],
-      });
-    }
-  } catch (error) {
-    console.log("Error".red, error);
-    res.status(500).send({
-      "error": error
-    });
-  }
-});
-
 
 // callback function - directs back to home page
 app.get('/callback', function (req, res) {
   res.sendFile(__dirname + '/public/index.html');
 });
 
+app.get('/getEnv', function (req, res) {
+  res.status(200).send({
+    "myinfo_authorise_url": MYINFO_AUTHORISE_URL,
+    "myinfo_client_id": MYINFO_CLIENT_ID,
+    "myinfo_attributes": MYINFO_ATTRIBUTES,
+    "myinfo_purpose": MYINFO_PURPOSE,
+    "sgid_authorise_url": SGID_AUTHORISE_URL,
+    "sgid_scope": SGID_SCOPE
+  });
+})
 
-// getPersonData function - call MyInfo Token + Person API
-app.post('/getPersonData', function (req, res, next) {
-
+app.post('/getSingpassData', async function (req, res) {
   try {
-    // get variables from frontend
-    var authCode = req.body.authCode;
-    var state = req.body.state;
-    var txnNo = crypto.randomBytes(10).toString("hex");
+    const auth_code = req.body.auth_code;
+    const redirect_uri = req.body.redirect_uri;
+    const token_url_headers = createHeaders("POST", {
+      "code": auth_code,
+      "redirect_uri": redirect_uri,
+      "client_secret": MYINFO_CLIENT_SECRET
+    }, MYINFO_TOKEN_URL, MYINFO_CLIENT_ID)
+    // get token
+    const token_response = await fetch(MYINFO_TOKEN_URL, {
+      method: "POST",
+      headers: token_url_headers,
+      body: new URLSearchParams({ code : auth_code})
+    })
+    const token_data = await token_response.json();
+    const token = token_data.access_token;
+    const { uinfin, attributes } = getProfileAndScope(token)
 
-    // console.log("> AuthCode   : ", authCode);
-    // console.log("> State      : ", state);
-    // console.log("> txnNo      : ", txnNo);
+    // get person data
+    const person_url = `${MYINFO_PERSON_URL}/${uinfin}`
+    const person_url_headers = createHeaders("GET", {
+      "attributes": attributes
+    }, person_url, MYINFO_CLIENT_ID, token)
+  
+    const person_response = await fetch(`${MYINFO_PERSON_URL}/${uinfin}?attributes=${attributes}`, {
+      method: "GET",
+      headers: person_url_headers
+    })
 
-    let connector = new MyInfoConnector(config.MYINFO_CONNECTOR_CONFIG);
-    console.log("Calling MyInfo NodeJs Library...".green);
 
-    connector.getMyInfoPersonData(authCode, state, txnNo)
-      .then(personData => {
-        
-        /* 
-        P/s: Your logic to handle the person data ...
-        */
-
-        console.log('--- Sending Person Data From Your-Server (Backend) to Your-Client (Frontend)---:'.green);
-        console.log(JSON.stringify(personData)); // log the data for demonstration purpose only
-        res.status(200).send(personData); //return personData
-      })
-      .catch(error => {
-        console.log("---MyInfo NodeJs Library Error---".red);
-        console.log(error);
-        res.status(500).send({
-          "error": error
-        });
-      });
+    const person_response_body = await person_response.text();
+    const decrypted_person_data = await decryptSingpassData(person_response_body);
+    res.status(200).send(decrypted_person_data);
   } catch (error) {
     console.log("Error".red, error);
     res.status(500).send({
       "error": error
     });
   }
-});
+})
+
+app.post('/getSgIDData', async function (req, res) {
+  try {
+    const auth_code = req.body.code;
+    const token_response = await fetch(SGID_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ code : auth_code, clientId: 'sgidclient'})
+    })
+    const token_data = await token_response.json();
+
+    const person_response = await fetch(SGID_PERSON_URL, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token_data.access_token}`
+      }
+    })
+    
+    const person_response_body = await person_response.json();
+    const data = await decryptSgIdData(person_response_body);
+    res.status(200).send(data)
+  } catch (error) {
+    console.log("Error".red, error);
+    res.status(500).send({
+      "error": error
+    });
+  }
+})
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
@@ -138,4 +156,4 @@ app.use(function (err, req, res, next) {
 
 
 
-app.listen(port, () => console.log(`Demo App Client listening on port ${port}!`));
+app.listen(port,'::', () => console.log(`Demo App Client listening on port ${port}!`));

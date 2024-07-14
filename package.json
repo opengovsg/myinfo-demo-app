@@ -4,9 +4,7 @@
   "description": "This is MyInfo Demo App",
   "main": "app.js",
   "scripts": {
-    "start": "npm run test",
-    "test": "node app.js test",
-    "sandbox": "node app.js sandbox"
+    "start": "nodemon app.js"
   },
   "author": "MyInfo Team",
   "license": "ISC",
@@ -15,9 +13,12 @@
     "colors": "^1.4.0",
     "cookie-parser": "^1.4.5",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.17.1",
+    "jsonwebtoken": "^9.0.2",
     "lodash": "^4.17.21",
-    "myinfo-connector-nodejs": "^0.0.8",
+    "node-jose": "^2.2.0",
+    "nodemon": "^3.1.4",
     "path": "^0.12.7",
     "pug": "^3.0.2"
   }
