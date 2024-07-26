@@ -1,0 +1,36 @@
+# fly.toml app configuration file generated for myinfo-demo-app on 2024-07-11T00:56:25+08:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'myinfo-demo-app'
+primary_region = 'hkg'
+
+[build]
+
+[env]
+  APP_NAME = 'Singpass Integration Demo'
+  MYINFO_AUTHORISE_URL="https://mockpass.demos.sg/myinfo/v3/authorise"
+  MYINFO_TOKEN_URL="https://mockpass.demos.sg/myinfo/v3/token"
+  MYINFO_PERSON_URL="https://mockpass.demos.sg/myinfo/v3/person"
+  MYINFO_CLIENT_ID="mockClientId"
+  MYINFO_ATTRIBUTES="uinfin,name,sex,race,nationality,dob,email,mobileno,regadd,housingtype,hdbtype,marital,edulevel,noa-basic"
+  MYINFO_PURPOSE="MyInfo Demo"
+  MYINFO_CLIENT_SECRET="mockClientSecret"
+  SGID_AUTHORISE_URL="https://mockpass.demos.sg/v2/oauth/authorize"
+  SGID_SCOPE="openid myinfo.nric_number myinfo.name myinfo.email myinfo.sex myinfo.race myinfo.mobile_number myinfo.registered_address myinfo.date_of_birth myinfo.nationality myinfo.housingtype myinfo.hdbtype myinfo.marital_status"
+  SGID_TOKEN_URL="https://mockpass.demos.sg/v2/oauth/token"
+  SGID_PERSON_URL="https://mockpass.demos.sg/v2/oauth/userinfo"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

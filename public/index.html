@@ -16,31 +16,32 @@
 	<script>
 		// ---START---SETUP VARIABLES---
 		var scrollToAppForm = false;
-		var authApiUrl; // URL for authorise API
-		var clientId; // your app_id/client_id provided to you during onboarding
-		var redirectUrl; // callback url for your application
-		var purpose; // The purpose of your data retrieval
-		var state = Math.floor(Math.random() * 100000); // Identifier that represents the user's session with the client (for testing - andomly generated state)
-		var attributes; // the attributes you are retrieving for your application to fill the form
+		var myinfo_authorise_url;
+		var myinfo_client_id;
+		var myinfo_attributes;
+		var myinfo_purpose;
+		var redirect_url;
+		var sgid_authorise_url;
+		var sgid_scope;
+		var state = Math.floor(Math.random() * 100000); // Identifier that represents the user's session with the client (for testing - randomly generated state)
+		var nonce = Math.floor(Math.random() * 100000);
 		var securityEnable; // the auth level, determines the flow
 		// ---END---SETUP VARIABLES---
 
-
 		// ---START---WINDOW ONLOAD---
 		window.onload = function (e) {
-			// invoke AJAX call to get the demo app info from config
+			redirect_url = window.location.origin + "/callback";
 			$.ajax({
 				url: "/getEnv",
 				data: {},
 				type: "GET",
 				success: function (result) {
-					// console.log("result:", result);
-					clientId = result.clientId;
-					redirectUrl = result.redirectUrl;
-					attributes = result.attributes;
-					purpose = result.purpose;
-					environment = result.environment;
-					authApiUrl = result.authApiUrl;
+					myinfo_authorise_url = result.myinfo_authorise_url;
+					myinfo_client_id = result.myinfo_client_id;
+					myinfo_attributes = result.myinfo_attributes;
+					myinfo_purpose = result.myinfo_purpose;
+					sgid_authorise_url = result.sgid_authorise_url;
+					sgid_scope = result.sgid_scope;
 				},
 				error: function (result) {
 					alert("ERROR:" + JSON.stringify(result.responseJSON.error));
@@ -52,9 +53,13 @@
 
 		// ---START---MAIN HANDLER---
 		$(function () {
-			$("#formAuthorise").submit(function (event) {
+			$("#formSingpass").submit(function (event) {
 				event.preventDefault();
-				callAuthoriseApi();
+				callAuthoriseAPI('singpass');
+			});
+			$("#formSgID").submit(function (event) {
+				event.preventDefault();
+				callAuthoriseAPI('sgid');
 			});
 			$("#formApplication").submit(function (event) {
 				event.preventDefault();
@@ -66,13 +71,21 @@
 
 
 		// ---START---AUTH API---
-		function callAuthoriseApi() {
-			var authoriseUrl = authApiUrl + "?client_id=" + clientId +
-				"&attributes=" + attributes +
-				"&purpose=" + purpose +
+		function callAuthoriseAPI(mode) {
+			var authoriseUrl;
+			if (mode === 'singpass') {
+				authoriseUrl = myinfo_authorise_url + "?client_id=" + myinfo_client_id +
+				"&attributes=" + myinfo_attributes +
+				"&purpose=" + myinfo_purpose +
 				"&state=" + encodeURIComponent(state) +
-				"&redirect_uri=" + redirectUrl;
-
+				"&redirect_uri=" + redirect_url;
+			} else {
+				// this is sgid mode
+				authoriseUrl = sgid_authorise_url + "?scope=" + sgid_scope +
+				"&state=" + encodeURIComponent(state) +
+				"&nonce=" + encodeURIComponent(nonce) +
+				"&redirect_uri=" + redirect_url;
+			}
 			window.location = authoriseUrl;
 		}
 		// ---END---AUTH API---
@@ -81,7 +94,11 @@
 		// ---START---CALLBACK HANDLER (AUTH CODE)
 		if (this.location.href.indexOf("callback?code") > -1) {
 			scrollToAppForm = true;
-			callServerAPIs(); // call the backend server APIs
+			if (this.location.href.indexOf("scope") > -1) {
+				callServerAPIsV3('singpass')
+			} else {
+				callServerAPIsV3('sgid')
+			}
 		} else if (this.location.href.indexOf("callback") > -1) {
 			scrollToAppForm = true;
 			alert("ERROR:" + JSON.stringify("Missing Auth Code"));
@@ -90,31 +107,64 @@
 
 
 		// ---START---CALL SERVER API - calling server side APIs (token & person) to get the person data for prefilling form
-		function callServerAPIs() {
-			var authCode = $.url(this.location.href).param('code');
-			var state = $.url(this.location.href).param('state');
-			// console.log("Auth Code:",authCode);
-			// console.log("State:",state);
 
-			// invoke AJAX call from frontend client side to your backend server side
-			$.ajax({
-				url: "/getPersonData",
-				data: {
-					authCode: authCode,
-					state: state,
-				},
-				type: "POST", // post to server side
-				success: function (result) {
-					// console.log("result",result);
-					prefillForm(result);
-				},
-				error: function (result) {
-					alert("ERROR:" + JSON.stringify(result.responseJSON.error));
-				}
-			});
+		function callServerAPIsV3(mode) {
+			var auth_code = $.url(this.location.href).param('code');
+			if (mode === 'singpass') {
+				const redirect_uri = window.location.origin + "/callback";
+				var attributes = $.url(this.location.href).param('scope').replace(/ /g, ",");
+				$.ajax({
+					url: "/getSingpassData",
+					data: {
+						auth_code: auth_code,
+						redirect_uri: redirect_uri
+					},
+					type: "POST",
+					success: function (result) {
+						prefillForm(result);
+					},
+					error: function (result) {
+						alert("ERROR:" + JSON.stringify(result.responseJSON.error));
+					}
+				})
+			} else {
+				$.ajax({
+					url: "/getSgIDData",
+					data: {
+						code: auth_code,
+					},
+					type: "POST",
+					success: function (result) {
+						prefillSgId(result);
+					},
+					error: function (result) {
+						alert("ERROR:" + JSON.stringify(result.responseJSON.error));
+					}
+				})
+			}
 		}
 		// ---END---CALL SERVER API - calling server side APIs (token & person) to get the person data for prefilling form
 
+		// ---START---PREFILL FORM (with SGidDATA)
+		function prefillSgId(data) {
+			var formValues = {
+				"uinfin": data["myinfo.nric_number"],
+				"name": data["myinfo.name"],
+				"sex": data["myinfo.sex"],
+				"race": data["myinfo.race"],
+				"nationality": data["myinfo.nationality"],
+				"dob": data["myinfo.date_of_birth"],
+				"email": data["myinfo.email"],
+				"mobileno": data["myinfo.mobile_number"],
+				"regadd": data["myinfo.registered_address"],
+				"housingtype": data["myinfo.housingtype"] == "NA" ? data["myinfo.hdbtype"] : data["myinfo.housingtype"],
+				"marital": data["myinfo.marital_status"],
+				"edulevel": "",
+				"assessableincome": ""
+			};
+
+			populate('#formApplication', formValues);
+		}
 
 		// ---START---PREFILL FORM (with MyInfo data)
 		function prefillForm(data) {
@@ -205,8 +255,11 @@
 							<p>To start the SingPass login and consent process, click on the "Retrieve MyInfo" button
 								below.</p>
 						</div>
-						<form id="formAuthorise">
-							<a href="#" onclick="$(this).closest('form').submit()" class="btn2">Retrieve MyInfo</a>
+						<form id="formSingpass">
+							<a href="#" onclick="$(this).closest('form').submit()" class="btn2">Singpass</a>
+						</form>
+						<form id="formSgID">
+							<a href="#" onclick="$(this).closest('form').submit()" class="btn2">sgID</a>
 						</form>
 						<hr>
 						<small>Note: refer to the <a href="https://www.ndi-api.gov.sg/library/myinfo/resources-personas"
